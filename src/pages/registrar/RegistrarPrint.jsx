@@ -51,7 +51,7 @@ const RegistrarPrint = () => {
             // 2. Get appointments and consultations for timeline
             const [apptRes, consultRes] = await Promise.all([
                 supabase.from('appointment').select('appodate, status, doctor:docid(docname)').eq('pid', pid),
-                supabase.from('consultations').select('consultation_date, clinical_impression, doctor:docid(docname)').eq('pid', pid)
+                supabase.from('consultations').select('created_at, clinical_impression, doctor:docid(docname)').eq('pid', pid)
             ]);
 
             const events = [];
@@ -65,7 +65,7 @@ const RegistrarPrint = () => {
             });
             (consultRes.data || []).forEach(c => {
                 events.push({
-                    event_date: new Date(c.consultation_date).toISOString().split('T')[0],
+                    event_date: c.created_at ? new Date(c.created_at).toISOString().split('T')[0] : 'N/A',
                     type: 'CONSULTATION',
                     provider: c.doctor?.docname || 'Staff',
                     detail: c.clinical_impression || 'Clinical visit'

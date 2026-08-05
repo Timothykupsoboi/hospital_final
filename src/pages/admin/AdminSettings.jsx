@@ -78,7 +78,7 @@ const AdminSettings = () => {
                 .catch(console.error);
 
             supabase
-                .from('username_change_requests')
+                .from('password_change_requests')
                 .select('*')
                 .order('created_at', { ascending: false })
                 .then(({ data, error }) => {
@@ -97,9 +97,9 @@ const AdminSettings = () => {
                 .subscribe();
 
             const userSubscription = supabase
-                .channel('username_change_requests_channel')
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'username_change_requests' }, payload => {
-                    supabase.from('username_change_requests').select('*').order('created_at', { ascending: false }).then(({ data }) => {
+                .channel('password_change_requests_channel_2')
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'password_change_requests' }, payload => {
+                    supabase.from('password_change_requests').select('*').order('created_at', { ascending: false }).then(({ data }) => {
                         if (data) setUsernameRequests(data);
                     });
                 })
@@ -181,7 +181,7 @@ const AdminSettings = () => {
             showToast('Username change approved and updated!');
             
             // Refresh list
-            const { data } = await supabase.from('username_change_requests').select('*').order('created_at', { ascending: false });
+            const { data } = await supabase.from('password_change_requests').select('*').order('created_at', { ascending: false });
             if (data) setUsernameRequests(data);
         } catch (err) {
             showToast('Error approving username change: ' + err.message, 'error');
@@ -191,14 +191,14 @@ const AdminSettings = () => {
     const handleDenyUsername = async (id) => {
         try {
             await supabase
-                .from('username_change_requests')
+                .from('password_change_requests')
                 .update({ status: 'denied' })
                 .eq('id', id);
                 
             showToast('Username change denied');
             
             // Refresh list
-            const { data } = await supabase.from('username_change_requests').select('*').order('created_at', { ascending: false });
+            const { data } = await supabase.from('password_change_requests').select('*').order('created_at', { ascending: false });
             if (data) setUsernameRequests(data);
         } catch (err) {
             showToast('Error denying username change', 'error');

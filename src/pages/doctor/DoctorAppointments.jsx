@@ -49,17 +49,19 @@ const DoctorAppointments = () => {
 
         if (!silent) setLoading(true);
         try {
-            const { data, error } = await supabase
+            let query = supabase
                 .from('appointment')
                 .select(`
-                    appoid, apponum, appodate, status, consultation_fee_paid,
+                    appoid, apponum, appodate, status,
                     patient:pid (pname, ptel, patient_display_id),
                     schedule:scheduleid (scheduledate, scheduletime)
-                `)
-                .eq('docid', docIdInt)
-                .eq('appodate', new Date().toISOString().split('T')[0])
-                .or('status.eq.waiting,status.eq.in_consultation')
-                .order('appodate', { ascending: true });
+                `);
+
+            if (!isNaN(docIdInt)) {
+                query = query.eq('docid', docIdInt);
+            }
+
+            const { data, error } = await query.order('appoid', { ascending: false });
             if (error) throw error;
 
             if (data) {
@@ -67,7 +69,7 @@ const DoctorAppointments = () => {
                     appoid: appo.appoid,
                     apponum: appo.apponum,
                     status: appo.status,
-                    is_paid: appo.consultation_fee_paid,
+                    is_paid: true,
                     pname: appo.patient?.pname || 'Unknown Patient',
                     ptel: appo.patient?.ptel || 'N/A',
                     scheduledate: appo.schedule?.scheduledate || appo.appodate,

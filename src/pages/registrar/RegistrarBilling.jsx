@@ -20,8 +20,7 @@ const RegistrarBilling = () => {
             setLoading(true);
             const { data, error } = await supabase
                 .from('appointment')
-                .select('*, patient:pid(pname, pemail, patient_display_id)')
-                .in('status', ['waiting', 'in_consultation', 'pending_lab', 'lab_processing', 'lab_results_partial', 'lab_completed', 'completed'])
+                .select('*, patient:pid(pname, patient_display_id)')
                 .order('appodate', { ascending: false });
             
             if (error) {

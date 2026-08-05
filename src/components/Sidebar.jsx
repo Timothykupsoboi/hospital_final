@@ -22,14 +22,18 @@ const Sidebar = ({ userType }) => {
     const location = useLocation();
 
     // Get the logged-in user and their profile from AuthContext
-    const { profile, signOut } = useAuth();
+    const { profile, signOut, userType: authUserType } = useAuth();
 
     // Hospital branding fetched from Supabase system_config
     const [hospitalConfig, setHospitalConfig] = React.useState({ name: 'Moonview Medical Center', logo: '' });
     // Persist sidebar state across page loads to avoid "resetting" feel
     const [isCollapsed, setIsCollapsed] = React.useState(() => {
-        const saved = localStorage.getItem('sidebar_collapsed');
-        return saved !== null ? JSON.parse(saved) : (window.innerWidth < 1200);
+        try {
+            const saved = localStorage.getItem('sidebar_collapsed');
+            return saved !== null ? JSON.parse(saved) : (window.innerWidth < 1200);
+        } catch {
+            return window.innerWidth < 1200;
+        }
     });
     const [expandedMenu, setExpandedMenu] = React.useState(() => {
         return localStorage.getItem('sidebar_expanded_menu') || null;
@@ -69,29 +73,34 @@ const Sidebar = ({ userType }) => {
     };
 
     React.useEffect(() => {
+        let isMounted = true;
         // Fetch hospital name and logo from system_config table
         supabase
             .from('system_config')
             .select('key, value')
             .in('key', ['hospital_name', 'hospital_logo'])
-            .then(({ data }) => {
-                if (!data) return;
+            .then(({ data, error }) => {
+                if (error || !data || !isMounted) return;
                 const config = Object.fromEntries(data.map(r => [r.key, r.value]));
                 setHospitalConfig({
                     name: config.hospital_name || 'Moonview Medical Center',
                     logo: config.hospital_logo || '',
                 });
-            });
+            })
+            .catch(() => {});
 
-        // Close submenus when clicking outside
+        // Close submenus/mobile on click outside
         const handleClickOutside = (event) => {
             if (sidebarRef.current && !sidebarRef.current.contains(event.target)) {
-                // Only close on click outside if not a subitem click
+                if (isMobile) setShowMobile(false);
             }
         };
         document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
+        return () => {
+            isMounted = false;
+            document.removeEventListener('mousedown', handleClickOutside);
+        };
+    }, [isMobile]);
 
     // Sign out via Supabase Auth (AuthContext handles redirect)
     const handleLogout = () => signOut();
@@ -204,9 +213,11 @@ const Sidebar = ({ userType }) => {
         ]
     };
 
-    // If logged in user is admin ('a' or 'Admin'), always show admin items even on other role pages
-    const isAdmin = profile?.role === 'a' || profile?.role === 'Admin' || userType === 'a' || userType === 'Admin';
-    const effectiveUserType = isAdmin ? 'a' : (navItems[userType] ? userType : 'a');
+    // If logged in user is admin, show admin items; otherwise show role items or path items
+    const loggedInRole = profile?.role || authUserType;
+    const isAdmin = loggedInRole === 'a' || loggedInRole === 'Admin' || loggedInRole === 'administrator' || loggedInRole === 'superadmin';
+    const activeRoleType = navItems[userType] ? userType : (navItems[loggedInRole] ? loggedInRole : 'a');
+    const effectiveUserType = isAdmin ? 'a' : activeRoleType;
     const items = navItems[effectiveUserType] || navItems.a || [];
 
     const toggleSidebar = () => setIsCollapsed(!isCollapsed);
@@ -290,6 +301,8 @@ const Sidebar = ({ userType }) => {
                 }}>
                     {displayPhoto ? (
                         <img src={displayPhoto} alt="Profile" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    ) : hospitalConfig.logo ? (
+                        <img src={hospitalConfig.logo} alt="Logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                     ) : (
                         <img src="/logo.png" alt="Profile" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                     )}

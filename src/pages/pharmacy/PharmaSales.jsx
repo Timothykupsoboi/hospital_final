@@ -21,33 +21,10 @@ const PharmaSales = () => {
 
     const fetchSales = async () => {
         try {
-            // Attempt fetch with join - note: schema seems to link pharmacist_id to doctor table
-            let { data, error } = await supabase
+            const { data, error } = await supabase
                 .from('pharmacy_sale')
-                .select('*, pharmacist:pharmacist_id(docname)')
+                .select('*')
                 .order('created_at', { ascending: false });
-                
-            // Fallback if join with docname fails, try phname
-            if (error) {
-                console.warn("Join with docname failed, trying phname:", error.message);
-                const retry = await supabase
-                    .from('pharmacy_sale')
-                    .select('*, pharmacist:pharmacist_id(phname)')
-                    .order('created_at', { ascending: false });
-                data = retry.data;
-                error = retry.error;
-            }
-
-            // Final fallback: fetch without join
-            if (error) {
-                console.warn("Join failed completely, fetching sales without pharmacist link:", error.message);
-                const fallback = await supabase
-                    .from('pharmacy_sale')
-                    .select('*')
-                    .order('created_at', { ascending: false });
-                data = fallback.data;
-                error = fallback.error;
-            }
 
             if (error) throw error;
             

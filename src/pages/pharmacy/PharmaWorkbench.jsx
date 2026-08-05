@@ -62,7 +62,7 @@ const PharmaWorkbench = () => {
         try {
             setLoading(true);
             const [invRes, prescRes] = await Promise.all([
-                supabase.from('medicine').select('*, suppliers:supplier_id(name)').eq('is_active', true),
+                supabase.from('medicine').select('*').order('med_name'),
                 supabase.from('prescriptions')
                     .select(`
                         id,

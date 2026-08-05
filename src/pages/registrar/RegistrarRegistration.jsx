@@ -169,14 +169,14 @@ const RegistrarRegistration = () => {
                     pheight: formData.height || null
                 }).eq('pid', selectedPatient.pid);
 
-                await supabase.from('vitals').insert({
-                    appointment_id: data[0].appoid,
-                    temperature: formData.temp,
-                    blood_pressure: formData.bp,
-                    heart_rate: formData.heartRate,
+                await supabase.from('vitals_records').insert({
+                    pid: selectedPatient.pid,
+                    temp: formData.temp,
+                    bp: formData.bp,
+                    pulse: formData.heartRate,
                     weight: formData.weight,
                     height: formData.height,
-                    respiratory_rate: formData.respiratory,
+                    resp_rate: formData.respiratory,
                     spo2: formData.spo2
                 });
             }

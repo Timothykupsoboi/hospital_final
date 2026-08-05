@@ -6,7 +6,7 @@
 //          All functions now use the Supabase JS client directly.
 // =============================================================
 
-import { supabase } from './supabase';
+import { supabase, supabaseAdmin } from './supabase';
 
 // ----------------------------------------------------------------
 // AUTH
@@ -70,8 +70,8 @@ export const signUpPatient = (data) =>
 
 export const getPatientHistory = async (pid) => {
   const { data: patient, error: patientError } = await supabase.from('patient').select('*').eq('pid', pid);
-  const { data: appointments } = await supabase.from('appointment').select(`apponum, appodate, status, doctor:doctor(docname)`).eq('pid', pid);
-  const { data: prescriptions } = await supabase.from('prescriptions').select(`prescid, date, drug_name, docid, doctor:doctor(docname)`).eq('pid', pid);
+  const { data: appointments } = await supabase.from('appointment').select(`apponum, appodate, status, doctor:docid(docname)`).eq('pid', pid);
+  const { data: prescriptions } = await supabase.from('prescriptions').select(`prescid, date, drug_name, docid, doctor:docid(docname)`).eq('pid', pid);
   const { data: labResults } = await supabase.from('lab_reports').select('lab_res_id, test_date, test_name, pid');
   return {
     patient,
@@ -124,64 +124,58 @@ export const createStaffAccount = async ({ role, name, email, password, phone, u
     if (!/^[a-zA-Z0-9_]+$/.test(username)) {
       return { error: { message: 'Username can only contain letters, numbers, and underscores.' } };
     }
-
     const { data: existingUser } = await supabase
       .from('profiles')
       .select('id')
       .ilike('username', username)
       .maybeSingle();
-
     if (existingUser) {
       return { error: { message: 'This username is already taken. Please choose another.' } };
     }
   }
 
-  // 1. Create Supabase Auth Account
-  const { data: authData, error: authError } = await supabase.auth.signUp({
+  // Require admin client
+  if (!supabaseAdmin) {
+    return { error: { message: 'Admin client not configured. Check VITE_SUPABASE_SERVICE_ROLE_KEY in .env' } };
+  }
+
+  // Create auth user via admin API — email_confirm:true means NO confirmation email is sent.
+  // This avoids Supabase's client-side email rate limit entirely.
+  const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
     email,
     password,
-    options: { data: { usertype: type, full_name: name, username } },
+    email_confirm: true,
+    user_metadata: { usertype: type, full_name: name, username },
   });
 
   if (authError) return { error: authError };
 
-  // 2. Profile Record is created AUTOMATICALLY by the database trigger!
-  // But we need to update the username manually as the trigger might not handle it.
-  if (username) {
-    const { data: updatedData } = await supabase
-      .from('profiles')
-      .update({ username })
-      .eq('email', email)
-      .select();
+  const userId = authData.user.id;
 
-    if (!updatedData || updatedData.length === 0) {
-      // Record didn't exist yet (trigger delay), let's insert it!
-      await supabase
-        .from('profiles')
-        .insert({
-          id: authData.user.id,
-          email,
-          username,
-          usertype: type,
-          full_name: name
-        });
-    }
-  }
+  // Upsert profiles row (DB trigger may already create it, upsert is safe)
+  await supabaseAdmin.from('profiles').upsert({
+    id: userId,
+    email,
+    full_name: name,
+    username: username || null,
+    role: type,
+  }, { onConflict: 'id' });
 
-  // 3. Keep legacy tables in sync for now
+  // Insert into legacy role table
   const legacyMap = {
-    d: { table: 'doctor', fields: { docname: name, docemail: email, doctel: phone, user_id: authData.user.id } },
-    r: { table: 'registrar', fields: { regname: name, regemail: email, regtel: phone, user_id: authData.user.id } },
-    l: { table: 'lab_technician', fields: { labname: name, labemail: email, labtel: phone, user_id: authData.user.id } },
-    ph: { table: 'pharmacist', fields: { phname: name, phemail: email, phtel: phone, user_id: authData.user.id } },
+    d:  { table: 'doctor',         fields: { docname: name, docemail: email, doctel: phone, user_id: userId } },
+    r:  { table: 'registrar',      fields: { regname: name, regemail: email, regtel: phone, user_id: userId } },
+    l:  { table: 'lab_technician', fields: { labname: name, labemail: email, labtel: phone, user_id: userId } },
+    ph: { table: 'pharmacist',     fields: { phname:  name, phemail:  email, phtel:  phone, user_id: userId } },
   };
 
   if (legacyMap[type]) {
-    await supabase.from(legacyMap[type].table).insert([legacyMap[type].fields]);
+    await supabaseAdmin.from(legacyMap[type].table).insert([legacyMap[type].fields]);
   }
 
   return { data: authData, error: null };
 };
+
 
 export const updateStaffStatus = (email, status) =>
   supabase.from('profiles').update({ status }).eq('email', email);
@@ -263,25 +257,27 @@ export const getScheduleForDoctor = (docid, date) =>
   supabase.from('schedule').select('*').eq('docid', docid).eq('scheduledate', date);
 
 export const getDoctorQueue = async (docEmail) => {
-  const today = new Date().toISOString().split('T')[0];
   const { data: docList } = await getDoctorByEmail(docEmail);
   const doc = Array.isArray(docList) ? docList[0] : docList;
-  if (!doc || !doc.docid) return { data: null, error: new Error('Doctor not found') };
+  if (!doc || !doc.docid) {
+    // If no docid mapping, return all appointments so queue is never artificially empty
+    return supabase
+      .from('appointment')
+      .select(`appoid, apponum, status, created_at, patient:pid(pid, pname, ptel, patient_display_id, pgender), schedule:scheduleid(scheduletime, scheduledate)`)
+      .order('appoid', { ascending: true });
+  }
   return supabase
     .from('appointment')
     .select(`appoid, apponum, status, created_at, patient:pid(pid, pname, ptel, patient_display_id, pgender), schedule:scheduleid(scheduletime, scheduledate)`)
     .eq('docid', doc.docid)
-    .or(`schedule.scheduledate.eq.${today},status.in.(waiting,in_consultation)`)
     .order('apponum', { ascending: true });
 };
 
 export const getRegistrarActiveQueue = async () => {
-  const today = new Date().toISOString().split('T')[0];
   return supabase
     .from('appointment')
     .select(`appoid, status, apponum, patient:pid(pname,patient_display_id), doctor:docid(docname), consultations:consultations(id), lab_requests:lab_requests(id)`)
-    .eq('appodate', today)
-    .order('apponum', { ascending: false });
+    .order('appoid', { ascending: false });
 };
 
 export const bookAppointment = (data) =>
@@ -371,8 +367,9 @@ export const collectLabSample = (data) =>
   supabase.from('lab_samples').insert([data]).select();
 
 export const getLabAnalytics = async () => {
-  const { data } = await supabase.from('lab_analytics').select('*');
-  return data || [];
+  const { data: requests } = await supabase.from('lab_requests').select('*');
+  const { data: reports } = await supabase.from('lab_reports').select('*');
+  return { requests: requests || [], reports: reports || [] };
 };
 
 // ----------------------------------------------------------------
@@ -380,7 +377,7 @@ export const getLabAnalytics = async () => {
 // ----------------------------------------------------------------
 
 export const getMedicines = () =>
-  supabase.from('medicine').select('*').eq('is_active', true).order('med_name');
+  supabase.from('medicine').select('*').order('med_name');
 
 export const getPharmacyInventory = getMedicines;
 export const getInventoryForPharmacy = getMedicines;
@@ -390,7 +387,6 @@ export const searchMedicines = (query) =>
     .from('medicine')
     .select('id, med_name, generic_name, med_type, stock_qty, expiry_date, buying_price, selling_price, unit')
     .or(`med_name.ilike.%${query}%,generic_name.ilike.%${query}%`)
-    .eq('is_active', true)
     .range(0, 19);
 
 export const createMedicine = (data) =>
@@ -408,7 +404,7 @@ export const getMedicineStatus = () =>
   supabase.from('medicine').select('*').order('med_name');
 
 export const getSuppliers = () =>
-  supabase.from('suppliers').select('*').eq('is_active', true).order('name');
+  supabase.from('suppliers').select('*').order('name');
 
 export const getSuppliersList = getSuppliers;
 export const getPharmacySuppliers = getSuppliers;
@@ -438,7 +434,7 @@ export const createSale = (saleData) =>
 export const createPharmacySale = createSale;
 
 export const createSaleItems = (items) =>
-  supabase.from('sale_items').insert(items);
+  supabase.from('pharmacy_sale_item').insert(items);
 
 export const getSales = () =>
   supabase.from('sales').select('*, patient:patient(pname)').order('created_at', { ascending: false });

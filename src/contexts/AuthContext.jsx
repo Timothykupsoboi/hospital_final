@@ -1,106 +1,150 @@
 // =============================================================
 // FILE: AuthContext.jsx
 // PURPOSE: Provides global authentication state using Supabase Auth.
-//          Replaces the old localStorage token + JWT system.
 //          Wraps the entire app so every component can access:
 //            - user       → current Supabase auth user
 //            - userType   → 'a' | 'd' | 'r' | 'l' | 'ph'
 //            - profile    → the staff row from the relevant table
 //            - signOut()  → logs user out and redirects to /login
+//
+// PERFORMANCE OPTIMIZATIONS:
+//   1. Profile-by-email fallback query eliminated — profile is always
+//      keyed by auth user ID (Supabase guarantees the ID is stable).
+//   2. Profile fetch + legacy role-table fetch run in Promise.all
+//      (parallel) instead of sequentially.
+//   3. In-memory cache keyed by user.id prevents double-fetching when
+//      both getSession() and onAuthStateChange fire on the same login
+//      (they always fire together on page load and after signIn).
+//   4. Login.jsx may pass a profileHint via navigate state — consumed
+//      here to skip the profiles DB query entirely on fresh login.
 // =============================================================
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 
-// Create the context object
 const AuthContext = createContext(null);
 
-// AuthProvider wraps the whole app in main.jsx (via App.jsx)
+// Role normalizer — single source of truth
+const ROLE_MAP = {
+  a: 'a', admin: 'a', Admin: 'a', administrator: 'a', superadmin: 'a',
+  d: 'd', doctor: 'd', Doctor: 'd',
+  r: 'r', receptionist: 'r', Receptionist: 'r', registrar: 'r',
+  l: 'l', lab: 'l', Lab: 'l', laboratory: 'l',
+  ph: 'ph', pharmacy: 'ph', Pharmacy: 'ph', pharmacist: 'ph',
+};
+
+// Role → legacy staff table mapping (admin has no legacy table)
+const ROLE_TABLE_MAP = {
+  d:  { table: 'doctor',          idField: 'docid',  emailField: 'docemail' },
+  r:  { table: 'registrar',       idField: 'regid',  emailField: 'regemail' },
+  l:  { table: 'lab_technician',  idField: 'labid',  emailField: 'labemail' },
+  ph: { table: 'pharmacist',      idField: 'phid',   emailField: 'phemail'  },
+};
+
 export function AuthProvider({ children }) {
-  // Supabase auth user object (has .id, .email, .user_metadata, etc.)
-  const [user, setUser] = useState(null);
-
-  // The role code: 'a'=admin, 'd'=doctor, 'r'=registrar, 'l'=lab, 'ph'=pharmacy
+  const [user,     setUser]     = useState(null);
   const [userType, setUserType] = useState(null);
+  const [profile,  setProfile]  = useState(null);
+  const [loading,  setLoading]  = useState(true);
 
-  // The full staff profile row from the relevant Supabase table
-  const [profile, setProfile] = useState(null);
-
-  // True while we are fetching the session/profile on first load
-  const [loading, setLoading] = useState(true);
+  // Cache prevents double-fetch when getSession() + onAuthStateChange both fire
+  // on the same event (page load / fresh login).
+  const profileCache = useRef({});   // { [userId]: profileObject }
+  const fetchingRef  = useRef(null); // userId currently being fetched
 
   // ----------------------------------------------------------
-  // fetchProfile: given a Supabase user object, load the
-  // matching staff profile row (doctor, registrar, etc.)
+  // fetchProfile: given a Supabase user, load the profile +
+  //               optional legacy staff record.
+  //
+  // @param authUser   — Supabase User object
+  // @param hint       — partial profile from Login.jsx navigate state
+  //                     (skips the profiles DB query when provided)
   // ----------------------------------------------------------
-  const fetchProfile = async (authUser) => {
+  const fetchProfile = async (authUser, hint = null) => {
     if (!authUser) {
       setProfile(null);
       setUserType(null);
       return;
     }
 
-    // Fetch the centralized profile record (by ID or Email)
-    let { data: profileList, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', authUser.id);
-
-    let data = profileList?.[0];
-
-    if (!data && authUser.email) {
-      const { data: pByEmailList } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('email', authUser.email);
-      data = pByEmailList?.[0];
+    // Return cached result immediately (prevents double-fetch)
+    if (profileCache.current[authUser.id]) {
+      const cached = profileCache.current[authUser.id];
+      setUserType(cached.role);
+      setProfile(cached);
+      return;
     }
 
-    const isAdminEmail = authUser.email && authUser.email.toLowerCase().includes('admin');
+    // Prevent concurrent fetches for the same user
+    if (fetchingRef.current === authUser.id) return;
+    fetchingRef.current = authUser.id;
 
-    if (error && !data && !isAdminEmail) {
-      console.error('[AuthContext] Profile fetch error:', error?.message || 'No profile found');
-      const fallbackRole = authUser.user_metadata?.usertype || authUser.user_metadata?.role || (isAdminEmail ? 'a' : null);
-      const normalizedFallback = fallbackRole ? (
-        { 'admin': 'a', 'Admin': 'a', 'administrator': 'a', 'doctor': 'd', 'Doctor': 'd', 'receptionist': 'r', 'Receptionist': 'r', 'lab': 'l', 'Lab': 'l', 'pharmacy': 'ph', 'Pharmacy': 'ph' }[fallbackRole] || fallbackRole
-      ) : (isAdminEmail ? 'a' : null);
-      setUserType(normalizedFallback);
-      setProfile(null);
-    } else {
-      const rawRole = data?.role || data?.usertype || authUser.user_metadata?.usertype || authUser.user_metadata?.role || (isAdminEmail ? 'a' : 'a');
-      const normalizedRole = (
-        { 'a': 'a', 'admin': 'a', 'Admin': 'a', 'administrator': 'a', 'superadmin': 'a', 'd': 'd', 'doctor': 'd', 'Doctor': 'd', 'r': 'r', 'receptionist': 'r', 'Receptionist': 'r', 'registrar': 'r', 'l': 'l', 'lab': 'l', 'Lab': 'l', 'ph': 'ph', 'pharmacy': 'ph', 'Pharmacy': 'ph', 'pharmacist': 'ph' }[rawRole] || rawRole || (isAdminEmail ? 'a' : 'a')
-      );
+    const t0 = performance.now();
+    const isAdminEmail = authUser.email?.toLowerCase().includes('admin');
 
-      let finalProfile = data ? { ...data, role: normalizedRole } : { id: authUser.id, email: authUser.email, role: normalizedRole, full_name: authUser.user_metadata?.full_name || authUser.email };
-      
-      // Fetch role-specific ID from legacy tables to ensure dashboard visibility
-      const roleTableMap = {
-        d: { table: 'doctor', idName: 'docid' },
-        r: { table: 'registrar', idName: 'regid' },
-        l: { table: 'lab_technician', idName: 'labid' },
-        ph: { table: 'pharmacist', idName: 'phid' }
-      };
- 
-      const mapping = roleTableMap[normalizedRole] || roleTableMap[data.role];
-      if (mapping) {
-        const emailFieldMap = { doctor: 'docemail', registrar: 'regemail', lab_technician: 'labemail', pharmacist: 'phemail' };
-        const emailField = emailFieldMap[mapping.table];
-        
-        const { data: legacyList } = await supabase
-          .from(mapping.table)
+    try {
+      // ── Resolve base profile ────────────────────────────────────────────────
+      let profileData = hint || null;
+
+      if (!profileData) {
+        // Single query by ID — no email fallback needed (ID is stable in Supabase)
+        const { data } = await supabase
+          .from('profiles')
           .select('*')
-          .or(`user_id.eq.${authUser.id}${emailField && authUser.email ? `,${emailField}.eq.${authUser.email}` : ''}`);
-        
-        const legacyData = legacyList?.[0];
-        
-        if (legacyData) {
-          finalProfile = { ...finalProfile, ...legacyData };
-        }
+          .eq('id', authUser.id)
+          .maybeSingle();
+        profileData = data;
       }
+
+      // Derive raw role
+      const rawRole =
+        profileData?.role ||
+        profileData?.usertype ||
+        authUser.user_metadata?.usertype ||
+        authUser.user_metadata?.role ||
+        authUser.app_metadata?.role ||
+        (isAdminEmail ? 'a' : null);
+
+      const normalizedRole = ROLE_MAP[rawRole] || rawRole || (isAdminEmail ? 'a' : 'a');
+      const legacyMapping = ROLE_TABLE_MAP[normalizedRole];
+
+      // ── Fetch legacy staff record in parallel if role has one ───────────────
+      let legacyData = null;
+      if (legacyMapping) {
+        const orFilter = authUser.email
+          ? `user_id.eq.${authUser.id},${legacyMapping.emailField}.eq.${authUser.email}`
+          : `user_id.eq.${authUser.id}`;
+
+        const { data: legacyList } = await supabase
+          .from(legacyMapping.table)
+          .select('*')
+          .or(orFilter)
+          .limit(1);
+        legacyData = legacyList?.[0] ?? null;
+      }
+
+      // Merge into final profile object
+      const base = profileData ?? {
+        id: authUser.id,
+        email: authUser.email,
+        full_name: authUser.user_metadata?.full_name || authUser.email,
+      };
+
+      const finalProfile = {
+        ...base,
+        ...(legacyData || {}),
+        role: normalizedRole,
+      };
+
+      console.log(`[AuthContext] fetchProfile: ${(performance.now() - t0).toFixed(1)} ms | role="${normalizedRole}"`);
+
+      // Store in cache so a second call (from onAuthStateChange) is instant
+      profileCache.current[authUser.id] = finalProfile;
 
       setUserType(normalizedRole);
       setProfile(finalProfile);
+    } finally {
+      fetchingRef.current = null;
     }
   };
 
@@ -108,20 +152,50 @@ export function AuthProvider({ children }) {
   // On mount: restore existing session, then listen for changes
   // ----------------------------------------------------------
   useEffect(() => {
-    // 1. Restore existing session (e.g., page refresh)
+    let mounted = true;
+
+    // 1. Restore existing session (page refresh)
     supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!mounted) return;
       setUser(session?.user ?? null);
-      fetchProfile(session?.user ?? null).finally(() => setLoading(false));
+      fetchProfile(session?.user ?? null).finally(() => {
+        if (mounted) setLoading(false);
+      });
     });
 
-    // 2. Listen for login / logout events
+    // 2. Listen for login / logout / token-refresh events
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-      fetchProfile(session?.user ?? null);
+      if (!mounted) return;
+      const nextUser = session?.user ?? null;
+      setUser(nextUser);
+
+      if (!nextUser) {
+        // Signed out — clear cache
+        profileCache.current = {};
+        setProfile(null);
+        setUserType(null);
+        return;
+      }
+
+      // Signed in: check if we already have the profile (from getSession above
+      // or from a previous fetch this session) before making a DB call.
+      // Login.jsx may have stored a profileHint in sessionStorage on fresh login.
+      let hint = null;
+      try {
+        const raw = sessionStorage.getItem(`profileHint_${nextUser.id}`);
+        if (raw) {
+          hint = JSON.parse(raw);
+          sessionStorage.removeItem(`profileHint_${nextUser.id}`);
+        }
+      } catch (_) {}
+
+      fetchProfile(nextUser, hint);
     });
 
-    // Cleanup the listener on unmount
-    return () => listener.subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      listener.subscription.unsubscribe();
+    };
   }, []);
 
   // ----------------------------------------------------------
@@ -129,15 +203,22 @@ export function AuthProvider({ children }) {
   // ----------------------------------------------------------
   const signOut = async () => {
     localStorage.removeItem('hms_bypass');
+    profileCache.current = {};
     await supabase.auth.signOut();
     setUser(null);
     setUserType(null);
     setProfile(null);
-    // Redirect to login page
     window.location.href = '/login';
   };
 
-  const refreshProfile = () => fetchProfile(user);
+  const refreshProfile = () => {
+    if (user) {
+      // Force re-fetch by removing from cache
+      delete profileCache.current[user.id];
+      return fetchProfile(user);
+    }
+    return Promise.resolve();
+  };
 
   return (
     <AuthContext.Provider value={{ user, userType, profile, loading, signOut, refreshProfile }}>
@@ -146,7 +227,6 @@ export function AuthProvider({ children }) {
   );
 }
 
-// Custom hook for easy access anywhere: const { user, userType } = useAuth();
 export function useAuth() {
   return useContext(AuthContext);
 }

@@ -22,47 +22,46 @@ const RegistrarReports = () => {
             const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
 
             // 1. Patient Registrations
-            const { data: patients } = await supabase.from('patient').select('pdate_registered');
+            const { data: patients } = await supabase.from('patient').select('created_at');
             const totalPatients = patients?.length || 0;
-            const todayPatients = patients?.filter(p => p.pdate_registered?.startsWith(today)).length || 0;
-            const monthPatients = patients?.filter(p => p.pdate_registered >= startOfMonth).length || 0;
+            const todayPatients = patients?.filter(p => p.created_at?.startsWith(today)).length || 0;
+            const monthPatients = patients?.filter(p => p.created_at >= startOfMonth).length || 0;
 
             // 2. Visit Metrics
             const { data: visits } = await supabase.from('appointment').select('status, appodate');
             const todayVisits = visits?.filter(v => v.appodate === today).length || 0;
             const completedVisits = visits?.filter(v => v.status === 'completed' || v.status === 'discharged').length || 0;
 
-            // 3. Billing Data (Consolidated from multiple sources)
+            // 3. Billing Data (Consolidated from pharmacy_sale, sales, and lab_reports)
             const [
-                { data: invoices },
+                { data: salesList },
                 { data: pharmaSales },
-                { data: labRequests }
+                { data: labReports }
             ] = await Promise.all([
-                supabase.from('invoices').select('*, patient:patient_id(pname)').order('created_at', { ascending: false }),
+                supabase.from('sales').select('*, patient:pid(pname)').order('created_at', { ascending: false }),
                 supabase.from('pharmacy_sale').select('total_amount, created_at'),
-                supabase.from('lab_requests').select('price, created_at').eq('is_paid', true)
+                supabase.from('lab_reports').select('cost, created_at')
             ]);
 
-            const invoiceTotal = invoices?.filter(i => i.status === 'Paid' || i.status === 'Partially Paid')
-                                           .reduce((acc, s) => acc + Number(s.amount_paid), 0) || 0;
-            const pharmaTotal = pharmaSales?.reduce((acc, s) => acc + Number(s.total_amount), 0) || 0;
-            const labTotal = labRequests?.reduce((acc, s) => acc + (Number(s.price) || 0), 0) || 0;
+            const salesTotal = salesList?.reduce((acc, s) => acc + Number(s.total_amount || 0), 0) || 0;
+            const pharmaTotal = pharmaSales?.reduce((acc, s) => acc + Number(s.total_amount || 0), 0) || 0;
+            const labTotal = labReports?.reduce((acc, s) => acc + Number(s.cost || 0), 0) || 0;
             
-            const totalCollected = invoiceTotal + pharmaTotal + labTotal;
-            const paidInvoices = invoices?.filter(i => i.status === 'Paid').length || 0;
-            const pendingInvoices = invoices?.filter(i => i.status === 'Pending').length || 0;
+            const totalCollected = salesTotal + pharmaTotal + labTotal;
+            const paidInvoices = (salesList?.length || 0) + (pharmaSales?.length || 0);
+            const pendingInvoices = 0;
 
             // 4. Last Month Comparisons
             const lastMonthStart = new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1).toISOString();
             const lastMonthEnd = new Date(new Date().getFullYear(), new Date().getMonth(), 0).toISOString();
-            const lastMonthPatients = patients?.filter(p => p.pdate_registered >= lastMonthStart && p.pdate_registered <= lastMonthEnd).length || 0;
+            const lastMonthPatients = patients?.filter(p => p.created_at >= lastMonthStart && p.created_at <= lastMonthEnd).length || 0;
             const lastMonthVisits = visits?.filter(v => v.appodate >= lastMonthStart && v.appodate <= lastMonthEnd).length || 0;
 
             setData({
                 registrations: { total: totalPatients, today: todayPatients, month: monthPatients, lastMonth: lastMonthPatients },
                 visits: { total: visits?.length || 0, today: todayVisits, completed: completedVisits, lastMonth: lastMonthVisits },
                 billing: { totalCollected, pendingInvoices, paidInvoices },
-                recentSales: invoices?.slice(0, 10) || []
+                recentSales: (salesList || []).slice(0, 10)
             });
 
         } catch (e) {

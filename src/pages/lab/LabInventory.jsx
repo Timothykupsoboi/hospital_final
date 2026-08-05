@@ -34,7 +34,7 @@ export default function LabInventory() {
     useEffect(() => { fetchItems(); }, [fetchItems]);
 
     const openAdd = () => { setEditing(null); setForm(emptyForm); setModal(true); };
-    const openEdit = (item) => { setEditing(item.item_id); setForm({ ...item }); setModal(true); };
+    const openEdit = (item) => { setEditing(item.id); setForm({ ...item }); setModal(true); };
 
     const handleSave = async () => {
         if (!form.item_name || !form.quantity) return showToast('Item name and quantity are required', 'error');
@@ -44,19 +44,15 @@ export default function LabInventory() {
                 const { error } = await supabase.from('lab_inventory').update({
                     item_name: form.item_name,
                     quantity: form.quantity,
-                    min_stock: form.min_stock || 10,
-                    expiry_date: form.expiry_date || null,
-                    supplier: form.supplier || ''
-                }).eq('item_id', editing);
+                    reorder_level: form.min_stock || 10
+                }).eq('id', editing);
                 if (error) throw error;
                 showToast('Item updated ✓');
             } else {
                 const { error } = await supabase.from('lab_inventory').insert({
                     item_name: form.item_name,
                     quantity: form.quantity,
-                    min_stock: form.min_stock || 10,
-                    expiry_date: form.expiry_date || null,
-                    supplier: form.supplier || ''
+                    reorder_level: form.min_stock || 10
                 });
                 if (error) throw error;
                 showToast('Item added ✓');
@@ -74,7 +70,7 @@ export default function LabInventory() {
     const handleDelete = async (id, name) => {
         if (!window.confirm(`Remove "${name}" from inventory?`)) return;
         try {
-            const { error } = await supabase.from('lab_inventory').delete().eq('item_id', id);
+            const { error } = await supabase.from('lab_inventory').delete().eq('id', id);
             if (error) throw error;
             showToast('Item removed');
             fetchItems();
@@ -195,7 +191,7 @@ export default function LabInventory() {
                                         <td style={{ padding: '16px 20px' }}>
                                             <div style={{ display: 'flex', gap: 8 }}>
                                                 <button onClick={() => openEdit(item)} style={{ padding: '6px 12px', borderRadius: 8, background: '#eff6ff', color: '#3b82f6', border: '1px solid #bfdbfe', cursor: 'pointer' }}><Edit2 size={13} /></button>
-                                                <button onClick={() => handleDelete(item.item_id, item.item_name)} style={{ padding: '6px 12px', borderRadius: 8, background: '#fef2f2', color: '#ef4444', border: '1px solid #fca5a5', cursor: 'pointer' }}><Trash2 size={13} /></button>
+                                                <button onClick={() => handleDelete(item.id, item.item_name)} style={{ padding: '6px 12px', borderRadius: 8, background: '#fef2f2', color: '#ef4444', border: '1px solid #fca5a5', cursor: 'pointer' }}><Trash2 size={13} /></button>
                                             </div>
                                         </td>
                                     </tr>
