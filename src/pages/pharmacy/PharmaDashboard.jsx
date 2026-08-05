@@ -40,18 +40,17 @@ const PharmaDashboard = () => {
                 
                 const [prescRes, salesRes, inventoryRes, labRes, expiringRes, activityRes] = await Promise.all([
                     supabase.from('prescriptions')
-                        .select('id, created_at, appointment!inner(patient!inner(pname), schedule!inner(doctor!inner(docname)))')
-                        .eq('status', 'pending'),
+                        .select('prescid, created_at, drug_name, pid, docid, patient:pid(pname), doctor:docid(docname)'),
                     supabase.from('pharmacy_sale')
                         .select('total_amount, created_at')
                         .gte('created_at', todayStr),
                     supabase.from('medicine')
-                        .select('id, stock_qty, reorder_level'),
+                        .select('id, stock_qty'),
                     supabase.from('lab_requests')
                         .select('id')
                         .neq('status', 'completed'),
                     supabase.from('medicine')
-                        .select('med_name, batch_no, expiry_date')
+                        .select('med_name, stock_qty, expiry_date')
                         .lte('expiry_date', threeMonthsFromNow.toISOString().split('T')[0])
                         .gte('expiry_date', todayStr.split('T')[0])
                         .order('expiry_date', { ascending: true })
@@ -104,8 +103,9 @@ const PharmaDashboard = () => {
                 // Set detail lists
                 setPrescriptions(pendingPresc.map(p => ({
                     ...p,
-                    pname: p.appointment?.patient?.pname || 'Unknown',
-                    docname: p.appointment?.schedule?.doctor?.docname || 'Unknown'
+                    id: p.prescid,
+                    pname: p.patient?.pname || 'Patient',
+                    docname: p.doctor?.docname || 'Doctor'
                 })));
 
                 setExpiringStocks(expiringRes.data || []);

@@ -49,8 +49,8 @@ export default function LabAnalytics() {
             const today = new Date().toISOString().split('T')[0];
             
             // 1. Fetch Datasets
-            const { data: requests } = await supabase.from('lab_requests').select('id, status, test_name, created_at, price, is_paid, appointment_id');
-            const { data: reports } = await supabase.from('lab_reports').select('created_at, request_id, technician_id');
+            const { data: requests } = await supabase.from('lab_requests').select('id, status, test_name, created_at, appointment_id, pid, docid');
+            const { data: reports } = await supabase.from('lab_reports').select('created_at, request_id, cost');
             const { data: techs } = await supabase.from('lab_technician').select('labid, labname');
             
             // 2. Fetch Patient Names for recent transactions

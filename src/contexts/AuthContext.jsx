@@ -56,22 +56,41 @@ export function AuthProvider({ children }) {
       return;
     }
 
-    // Prevent concurrent fetches for the same user ID
+    const t0 = performance.now();
+    const isAdminEmail = authUser.email?.toLowerCase().includes('admin');
+
+    // ── STEP 1: Instant Hydration from Auth Metadata (0 ms DB cost) ───────────
+    const metaRole =
+      authUser.user_metadata?.usertype ||
+      authUser.user_metadata?.role ||
+      authUser.app_metadata?.role ||
+      (isAdminEmail ? 'a' : null);
+
+    const initialRole = ROLE_MAP[metaRole] || metaRole || (isAdminEmail ? 'a' : null);
+    
+    if (initialRole) {
+      const initialProfile = {
+        id: authUser.id,
+        email: authUser.email,
+        full_name: authUser.user_metadata?.full_name || authUser.email,
+        username: authUser.user_metadata?.username,
+        role: initialRole,
+      };
+      setUserType(initialRole);
+      setProfile(prev => prev ? { ...initialProfile, ...prev } : initialProfile);
+    }
+
+    // Deduplicate concurrent DB queries for the same user ID
     if (fetchingRef.current.has(authUser.id)) {
-      console.log('[AuthContext] fetchProfile: dedup skip for', authUser.id);
       return;
     }
     fetchingRef.current.add(authUser.id);
 
-    const t0 = performance.now();
-    const isAdminEmail = authUser.email?.toLowerCase().includes('admin');
-
     try {
-      // ── Resolve base profile ──────────────────────────────────────────────
+      // ── STEP 2: Read optional Login hint from sessionStorage ─────────────
       let profileData = hint || null;
 
       if (!profileData) {
-        // Read profileHint stored by Login.jsx before navigate()
         try {
           const raw = sessionStorage.getItem(`profileHint_${authUser.id}`);
           if (raw) {
@@ -81,51 +100,47 @@ export function AuthProvider({ children }) {
         } catch (_) {}
       }
 
-      if (!profileData) {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', authUser.id)
-          .maybeSingle();
-        if (error) {
-          console.warn('[AuthContext] Profile query error:', error.message);
-        }
-        profileData = data || null;
+      // Determine target legacy table mapping
+      const activeRole = profileData?.role || profileData?.usertype || initialRole;
+      const normalizedRole = ROLE_MAP[activeRole] || activeRole || (isAdminEmail ? 'a' : null);
+      const legacyMapping = normalizedRole ? ROLE_TABLE_MAP[normalizedRole] : null;
+
+      // ── STEP 3: Execute DB Queries in Parallel (Promise.all) ───────────────
+      const profilePromise = profileData
+        ? Promise.resolve({ data: profileData, error: null })
+        : supabase.from('profiles').select('*').eq('id', authUser.id).maybeSingle();
+
+      const legacyPromise = legacyMapping
+        ? supabase.from(legacyMapping.table).select('*').or(
+            authUser.email
+              ? `user_id.eq.${authUser.id},${legacyMapping.emailField}.eq.${authUser.email}`
+              : `user_id.eq.${authUser.id}`
+          ).limit(1)
+        : Promise.resolve({ data: null, error: null });
+
+      const [profRes, legacyRes] = await Promise.all([profilePromise, legacyPromise]);
+
+      if (profRes.error) {
+        console.warn('[AuthContext] Profile query warning:', profRes.error.message);
+      }
+      if (legacyRes.error) {
+        console.warn('[AuthContext] Legacy table query warning:', legacyRes.error.message);
       }
 
-      // Derive normalized role
-      const rawRole =
-        profileData?.role ||
-        profileData?.usertype ||
-        authUser.user_metadata?.usertype ||
-        authUser.user_metadata?.role ||
-        authUser.app_metadata?.role ||
-        (isAdminEmail ? 'a' : null);
+      const fetchedProfile = profRes.data || profileData;
+      const legacyList = legacyRes.data;
+      const legacyData = Array.isArray(legacyList) ? legacyList[0] : legacyList;
 
-      const normalizedRole = ROLE_MAP[rawRole] || rawRole || (isAdminEmail ? 'a' : 'a');
-      const legacyMapping = ROLE_TABLE_MAP[normalizedRole];
+      // Final Role & Merged Profile
+      const rawFinalRole =
+        fetchedProfile?.role ||
+        fetchedProfile?.usertype ||
+        normalizedRole ||
+        (isAdminEmail ? 'a' : 'a');
 
-      // ── Fetch legacy staff record if role has one ─────────────────────────
-      let legacyData = null;
-      if (legacyMapping) {
-        try {
-          const orFilter = authUser.email
-            ? `user_id.eq.${authUser.id},${legacyMapping.emailField}.eq.${authUser.email}`
-            : `user_id.eq.${authUser.id}`;
+      const finalRole = ROLE_MAP[rawFinalRole] || rawFinalRole || 'a';
 
-          const { data: legacyList } = await supabase
-            .from(legacyMapping.table)
-            .select('*')
-            .or(orFilter)
-            .limit(1);
-          legacyData = legacyList?.[0] ?? null;
-        } catch (legacyErr) {
-          console.warn('[AuthContext] Legacy table query error:', legacyErr.message);
-        }
-      }
-
-      // Merge
-      const base = profileData ?? {
+      const base = fetchedProfile || {
         id: authUser.id,
         email: authUser.email,
         full_name: authUser.user_metadata?.full_name || authUser.email,
@@ -134,20 +149,18 @@ export function AuthProvider({ children }) {
       const finalProfile = {
         ...base,
         ...(legacyData || {}),
-        role: normalizedRole,
+        role: finalRole,
       };
 
-      console.log(`[AuthContext] fetchProfile: ${(performance.now() - t0).toFixed(1)} ms | role="${normalizedRole}"`);
+      console.log(`[AuthContext] fetchProfile sync completed: ${(performance.now() - t0).toFixed(1)} ms | role="${finalRole}"`);
 
-      setUserType(normalizedRole);
+      setUserType(finalRole);
       setProfile(finalProfile);
     } catch (err) {
-      // Always set a fallback profile so the app doesn't hang
       console.error('[AuthContext] fetchProfile error:', err.message);
-      const fallbackRole = authUser.user_metadata?.role || authUser.user_metadata?.usertype || (isAdminEmail ? 'a' : null);
-      const normalizedFallback = ROLE_MAP[fallbackRole] || fallbackRole || (isAdminEmail ? 'a' : null);
-      setUserType(normalizedFallback);
-      setProfile({ id: authUser.id, email: authUser.email, role: normalizedFallback });
+      const fallbackRole = initialRole || (isAdminEmail ? 'a' : 'a');
+      setUserType(fallbackRole);
+      setProfile({ id: authUser.id, email: authUser.email, role: fallbackRole });
     } finally {
       fetchingRef.current.delete(authUser.id);
     }
@@ -165,7 +178,12 @@ export function AuthProvider({ children }) {
       .then(({ data: { session } }) => {
         if (!mounted) return;
         setUser(session?.user ?? null);
-        return fetchProfile(session?.user ?? null);
+        if (session?.user) {
+          fetchProfile(session.user);
+        } else {
+          setProfile(null);
+          setUserType(null);
+        }
       })
       .catch((err) => {
         console.error('[AuthContext] getSession error:', err?.message);

@@ -30,7 +30,7 @@ export default function LabDashboard() {
             // 1. Fetch raw lab requests
             const { data: rawData, error: labError } = await supabase
                 .from('lab_requests')
-                .select('id, test_name, status, urgency, is_paid, created_at, appointment_id, clinical_indication')
+                .select('id, test_name, status, created_at, appointment_id, pid, docid, test_id, category')
                 .order('created_at', { ascending: false });
                 
             if (labError) throw labError;

@@ -719,7 +719,9 @@ const ConsultationModule = () => {
                     // Fetch related draft data
                     const [{ data: draftPrescriptions }, { data: draftLabs }] = await Promise.all([
                         supabase.from('prescriptions').select('id, drug_name, dosage, frequency, duration').eq('consultation_id', d.id),
-                        supabase.from('lab_requests').select('id, test_name, status').eq('consultation_id', d.id)
+                        d.appointment_id
+                          ? supabase.from('lab_requests').select('id, test_name, status').eq('appointment_id', d.appointment_id)
+                          : Promise.resolve({ data: [] })
                     ]);
 
                     if (draftPrescriptions) {

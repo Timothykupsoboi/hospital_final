@@ -16,6 +16,9 @@ export default defineConfig({
   },
 
   build: {
+    // Do not emit source maps in production builds (reduces bundle size, hides source)
+    sourcemap: false,
+
     // Raise the warning threshold to acknowledge the single-chunk build
     chunkSizeWarningLimit: 1500,
 

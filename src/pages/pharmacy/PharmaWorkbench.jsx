@@ -65,27 +65,20 @@ const PharmaWorkbench = () => {
                 supabase.from('medicine').select('*').order('med_name'),
                 supabase.from('prescriptions')
                     .select(`
-                        id,
-                        appointment_id,
+                        prescid,
+                        pid,
+                        docid,
                         drug_name,
-                        dosage,
-                        total_quantity,
-                        instructions,
+                        medicine_name,
+                        dose,
                         frequency,
-                        route,
                         duration,
-                        refills_count,
-                        dispensing_instructions,
+                        instructions,
+                        date,
                         created_at,
-                        appointment!inner(
-                            appodate,
-                            patient!inner(pid, pname, ptel),
-                            schedule!inner(
-                                doctor!inner(docname)
-                            )
-                        )
+                        patient:pid(pid, pname, ptel),
+                        doctor:docid(docname)
                     `)
-                    .eq('status', 'pending')
                     .order('created_at', { ascending: false })
             ]);
 
@@ -108,28 +101,34 @@ const PharmaWorkbench = () => {
     const fetchPrescriptions = (data) => {
         const groupedMap = {};
         (data || []).forEach(p => {
-            const aid = p.appointment_id || 'unlinked';
-            if (!groupedMap[aid]) {
-                groupedMap[aid] = {
-                    id: p.id,
-                    appointment_id: aid,
-                    pid: p.appointment?.patient?.pid,
-                    pname: p.appointment?.patient?.pname || 'Unknown',
-                    ptel: p.appointment?.patient?.ptel || '',
-                    docname: p.appointment?.schedule?.doctor?.docname || 'Unknown',
-                    consultation_date: p.appointment?.appodate,
+            const key = p.pid || 'unlinked';
+            if (!groupedMap[key]) {
+                groupedMap[key] = {
+                    id: p.prescid,
+                    appointment_id: key,
+                    pid: p.patient?.pid,
+                    pname: p.patient?.pname || 'Unknown Patient',
+                    ptel: p.patient?.ptel || '',
+                    docname: p.doctor?.docname || 'Dr. Medical Staff',
+                    consultation_date: p.date,
                     drug_count: 0,
                     drug_list_items: [],
                     created_at: p.created_at
                 };
             }
-            groupedMap[aid].drug_count += 1;
+            groupedMap[key].drug_count += 1;
             const drugStr = [
-                p.drug_name, p.dosage, p.total_quantity, p.instructions,
-                p.frequency || '', p.route || '', p.duration || '',
-                p.refills_count || '0', p.dispensing_instructions || ''
+                p.drug_name || p.medicine_name || 'Prescription',
+                p.dose || '',
+                '1',
+                p.instructions || '',
+                p.frequency || '',
+                'oral',
+                p.duration || '',
+                '0',
+                ''
             ].join('::');
-            groupedMap[aid].drug_list_items.push(drugStr);
+            groupedMap[key].drug_list_items.push(drugStr);
         });
         
         return Object.values(groupedMap).map(g => ({

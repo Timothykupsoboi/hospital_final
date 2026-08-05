@@ -178,7 +178,7 @@ export default function LabWorkbench() {
             // 1. Fetch raw lab requests
             const { data: rawData, error: labError } = await supabase
                 .from('lab_requests')
-                .select('id, test_name, status, is_paid, price, created_at, appointment_id, technician_id')
+                .select('id, test_name, status, created_at, appointment_id, pid, docid, test_id, category')
                 .in('status', ['pending', 'processing', 'sample_collected', 'results_entered', 'sample_rejected', 'completed'])
                 .order('created_at', { ascending: false });
 

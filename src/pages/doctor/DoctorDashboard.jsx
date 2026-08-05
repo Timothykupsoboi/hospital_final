@@ -82,8 +82,7 @@ const DoctorDashboard = () => {
                 .from('appointment')
                 .select(`
                     appoid, status, created_at,
-                    patient:pid (pid, pname, patient_display_id, pgender),
-                    consultation_fee_paid
+                    patient:pid (pid, pname, patient_display_id, pgender)
                 `)
                 .eq('appodate', today);
 
@@ -112,7 +111,7 @@ const DoctorDashboard = () => {
                     pname: appo.patient?.pname || 'Unknown Patient',
                     patient_display_id: appo.patient?.patient_display_id || 'Unknown',
                     pgender: appo.patient?.pgender || 'N/A',
-                    is_paid: appo.consultation_fee_paid
+                    is_paid: true
                 }));
                 
                 setAppointments(formattedQueue);

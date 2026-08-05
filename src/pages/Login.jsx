@@ -85,29 +85,20 @@ const Login = () => {
 
       if (!emailToUse.includes('@')) {
         const t0 = performance.now();
-        // Exact eq() first — 3× faster than ilike()
+        // Combined query: exact match or case-insensitive fallback in a single request
         const { data: profileData } = await supabase
           .from('profiles')
           .select('email')
-          .eq('username', emailToUse)
+          .or(`username.eq.${emailToUse},username.ilike.${emailToUse}`)
+          .limit(1)
           .maybeSingle();
-        console.log(`[Login] Username lookup: ${(performance.now() - t0).toFixed(1)} ms`);
+        console.log(`[Login Profile ⏱️] Step 1 Username Lookup: ${(performance.now() - t0).toFixed(1)} ms`);
 
         if (profileData?.email) {
           emailToUse = profileData.email;
         } else {
-          // Case-insensitive fallback
-          const { data: ilikeData } = await supabase
-            .from('profiles')
-            .select('email')
-            .ilike('username', emailToUse)
-            .maybeSingle();
-          if (ilikeData?.email) {
-            emailToUse = ilikeData.email;
-          } else {
-            setError('Username not found. Please enter a valid username or email address.');
-            return; // finally will call setLoading(false)
-          }
+          setError('Username not found. Please enter a valid username or email address.');
+          return;
         }
       }
 
@@ -117,14 +108,15 @@ const Login = () => {
         email: emailToUse,
         password,
       });
-      console.log(`[Login] signInWithPassword: ${(performance.now() - t1).toFixed(1)} ms`);
+      const authMs = (performance.now() - t1).toFixed(1);
+      console.log(`[Login Profile ⏱️] Step 2 Supabase Auth (signInWithPassword): ${authMs} ms`);
 
       if (authError) {
         setError(authError.message || 'Invalid email or password.');
-        return; // finally will call setLoading(false)
+        return;
       }
 
-      // ── Step 3: Resolve redirect route ─────────────────────────────────────
+      // ── Step 3: Instant Redirect Route Resolution from Auth Metadata ───────
       const t2 = performance.now();
       const meta = data.user?.user_metadata || {};
       const appMeta = data.user?.app_metadata || {};
@@ -133,31 +125,34 @@ const Login = () => {
       let rawRole = meta.usertype || meta.role || appMeta.role || appMeta.usertype;
       let profileHint = null;
 
+      // Only query DB if user_metadata is missing role information
       if (!rawRole || (!ROLE_ROUTES[rawRole] && !ROLE_ROUTES[normalizeRole(rawRole)])) {
-        // user_metadata missing role — fetch profile once
+        const tDb = performance.now();
         const { data: profile } = await supabase
           .from('profiles')
           .select('role, usertype, id, email, full_name, username, status')
           .eq('id', data.user.id)
           .maybeSingle();
+        console.log(`[Login Profile ⏱️] Step 3 Fallback Profile DB Query: ${(performance.now() - tDb).toFixed(1)} ms`);
         profileHint = profile;
         rawRole = profile?.role || profile?.usertype || (isAdminEmail ? 'a' : null);
       }
-      console.log(`[Login] Role resolution: ${(performance.now() - t2).toFixed(1)} ms | role="${rawRole}"`);
 
       const normalizedRole = normalizeRole(rawRole) || (isAdminEmail ? 'a' : null);
       const targetRoute = ROLE_ROUTES[rawRole] || ROLE_ROUTES[normalizedRole] || (isAdminEmail ? '/admin' : null);
+
+      console.log(`[Login Profile ⏱️] Step 3 Metadata Role Resolution: ${(performance.now() - t2).toFixed(1)} ms | role="${normalizedRole}"`);
 
       if (!targetRoute) {
         console.error('[Login] Unrecognized role:', rawRole, '| metadata:', meta);
         setError('Account role not recognized. Contact the system administrator.');
         await supabase.auth.signOut();
-        return; // finally will call setLoading(false)
+        return;
       }
 
-      console.log(`[Login] Total: ${(performance.now() - loginStart).toFixed(1)} ms → ${targetRoute}`);
+      const totalMs = (performance.now() - loginStart).toFixed(1);
+      console.log(`[Login Profile 🚀] TOTAL LOGIN SPEED: ${totalMs} ms → Navigating to ${targetRoute}`);
 
-      // Pass profileHint to AuthContext via sessionStorage so it skips a second DB fetch
       if (profileHint) {
         try {
           sessionStorage.setItem(`profileHint_${data.user.id}`, JSON.stringify(profileHint));

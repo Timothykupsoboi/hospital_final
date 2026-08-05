@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Moonview Medical](https://img.shields.io/badge/Moonview-Medical%20HMS-f97316?style=for-the-badge&logo=heart&logoColor=white)
+![Moonview Medical](https://img.shields.io/badge/Moonview-Medical%20HMS-1a56db?style=for-the-badge&logo=heart&logoColor=white)
 ![React](https://img.shields.io/badge/React-18-61DAFB?style=for-the-badge&logo=react&logoColor=black)
 ![Vite](https://img.shields.io/badge/Vite-5-646CFF?style=for-the-badge&logo=vite&logoColor=white)
 ![Supabase](https://img.shields.io/badge/Supabase-3ECF8E?style=for-the-badge&logo=supabase&logoColor=black)
@@ -10,7 +10,7 @@
 
 **A full-featured, role-based Hospital Management System built with React 18 and Supabase.**
 
-[Live Demo](#) · [Report Bug](https://github.com/Timothykupsoboi/hospital_final/issues) · [Request Feature](https://github.com/Timothykupsoboi/hospital_final/issues)
+[Report Bug](https://github.com/Timothykupsoboi/hospital_final/issues) · [Request Feature](https://github.com/Timothykupsoboi/hospital_final/issues)
 
 </div>
 
@@ -27,12 +27,13 @@
   - [Installation](#installation)
   - [Environment Variables](#environment-variables)
   - [Supabase Setup](#supabase-setup)
-- [User Roles](#user-roles)
+- [User Roles & Login](#user-roles--login)
 - [Deployment](#deployment)
   - [Deploying to Vercel](#deploying-to-vercel)
   - [Environment Variables on Vercel](#environment-variables-on-vercel)
 - [Performance](#performance)
 - [Database Schema](#database-schema)
+- [Security Notes](#security-notes)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -40,9 +41,9 @@
 
 ## Overview
 
-Moonview Medical HMS is a comprehensive, production-ready Hospital Management System designed to streamline clinical operations. It supports five distinct staff roles — Admin, Doctor, Registrar, Lab Technician, and Pharmacist — each with a fully isolated, purpose-built dashboard.
+Moonview Medical HMS is a comprehensive, production-ready Hospital Management System designed to streamline clinical operations across a full medical facility. It supports five distinct staff roles — **Admin, Doctor, Registrar, Lab Technician, and Pharmacist** — each with a fully isolated, purpose-built dashboard and real-time data updates.
 
-All data is persisted in a managed **Supabase (PostgreSQL)** backend, with real-time subscriptions for live queue and request updates. Authentication is handled entirely through Supabase Auth with role-based access control.
+All data is persisted in a managed **Supabase (PostgreSQL)** backend with real-time subscriptions for live queue and request updates. Authentication is handled entirely through Supabase Auth with role-based access control derived from a `profiles` table.
 
 ---
 
@@ -50,41 +51,43 @@ All data is persisted in a managed **Supabase (PostgreSQL)** backend, with real-
 
 ### 🏥 Admin
 - Centralized dashboard with live KPI metrics (patients, appointments, revenue, expenses)
-- Full staff management (create, update, deactivate accounts)
+- Full staff management — create, update, and deactivate accounts for all roles
 - Attendance tracking and leave management
 - Financial reporting and expense logging
-- Audit log viewer (all system activity)
-- System configuration (maintenance mode, clinic name, contact info)
+- Audit log viewer showing all system activity
+- System configuration (maintenance mode, clinic name, contact details)
 - Password change request approvals
 
 ### 👨‍⚕️ Doctor
 - Live appointment queue with real-time Supabase subscriptions
-- Full consultation module: history, vitals, clinical impression, diagnosis (ICD-10), prescriptions
-- Patient profile viewer with complete medical history
-- Lab test ordering and result review
-- Prescription management
-- Reports and analytics
+- Full consultation module: chief complaint, history, vitals, clinical impression
+- Structured diagnosis with ICD-10 code search and auto-complete
+- Prescription writer with drug, dose, frequency, duration, and instructions
+- Lab test ordering and result review directly in the consultation
+- Patient profile with complete medical history (consultations, prescriptions, lab results)
+- Doctor-level reports and analytics
 
-### 🗂 Registrar
-- Patient registration with auto-generated display IDs
-- Appointment scheduling and queue management
-- Billing and invoice generation
-- Printable medical records
-- Revenue reports (pharmacy, lab, consultation)
+### 🗂️ Registrar
+- Patient registration with auto-generated display IDs (`MV-P-XXX`)
+- Appointment scheduling and live queue management
+- Billing gate — approve and record consultation/lab/pharmacy charges
+- Printable medical records and invoices
+- Revenue reports broken down by department (pharmacy, lab, consultation)
 
 ### 🔬 Laboratory
-- Lab request workbench (receive, process, complete tests)
-- Result entry with printable reports
-- Lab catalog management (tests + pricing)
-- Inventory tracking with reorder alerts
-- Analytics dashboard
+- Lab request workbench — receive, process, and complete ordered tests
+- Structured result entry with printable PDF-ready report layout
+- Lab catalog management (tests, categories, and pricing)
+- Inventory tracking with reorder level alerts
+- Analytics dashboard (volume, turnaround time, revenue)
 
 ### 💊 Pharmacy
-- Prescription dispensing workbench
-- Inventory management with expiry tracking
-- Procurement and supplier management
+- Prescription dispensing workbench — view pending prescriptions grouped by patient
+- Point-of-sale inventory sales with barcode scanner support
+- Inventory management with expiry date tracking
+- Procurement and supplier management (purchase orders)
 - Sales recording and revenue reports
-- Medicine status monitoring (low stock, expired)
+- Medicine status monitoring (low stock, expiring soon)
 
 ---
 
@@ -95,15 +98,15 @@ All data is persisted in a managed **Supabase (PostgreSQL)** backend, with real-
 | **Frontend Framework** | React 18 |
 | **Build Tool** | Vite 5 |
 | **Routing** | React Router DOM v6 |
-| **Backend / Database** | Supabase (PostgreSQL) |
-| **Authentication** | Supabase Auth |
-| **Real-time** | Supabase Realtime (postgres_changes) |
+| **Backend / Database** | Supabase (PostgreSQL 15) |
+| **Authentication** | Supabase Auth (email/password) |
+| **Real-time** | Supabase Realtime (`postgres_changes`) |
 | **Styling** | Vanilla CSS + Inline Styles |
 | **Icons** | Lucide React |
 | **Date Handling** | date-fns |
 | **Select Components** | React Select |
 | **HTTP Client** | Axios |
-| **Deployment** | Vercel |
+| **Deployment** | Vercel (Edge Network) |
 
 ---
 
@@ -111,29 +114,40 @@ All data is persisted in a managed **Supabase (PostgreSQL)** backend, with real-
 
 ```
 edoc-main/
-├── public/                 # Static assets
+├── public/
+│   ├── logo.png            # App icon / PWA icon
+│   ├── manifest.json       # PWA manifest
+│   └── sw.js               # Service worker (offline support)
 ├── src/
 │   ├── components/         # Shared UI components
-│   │   ├── layouts/        # MainLayout (sidebar + nav)
-│   │   └── ...
+│   │   ├── layouts/
+│   │   │   └── MainLayout.jsx   # Sidebar + top nav wrapper
+│   │   ├── pharmacy/       # Pharmacy-specific sub-components
+│   │   ├── registrar/      # Registrar-specific sub-components
+│   │   └── NotificationCenter.jsx
 │   ├── contexts/
-│   │   └── AuthContext.jsx # Global auth state (user, role, profile)
+│   │   └── AuthContext.jsx # Global auth state (user, role, profile, cache)
 │   ├── lib/
-│   │   ├── supabase.js     # Supabase client + query logger
-│   │   └── api.js          # Centralized data-fetching functions
+│   │   ├── supabase.js     # Supabase client initialization
+│   │   └── api.js          # Centralized data-fetching helpers
 │   ├── pages/
 │   │   ├── admin/          # Admin role pages
 │   │   ├── doctor/         # Doctor role pages
 │   │   ├── lab/            # Lab technician pages
 │   │   ├── pharmacy/       # Pharmacist pages
-│   │   └── registrar/      # Registrar pages
-│   ├── App.jsx             # Root router + protected routes
-│   └── main.jsx            # Entry point
+│   │   ├── registrar/      # Registrar pages
+│   │   ├── Home.jsx        # Landing / splash screen
+│   │   ├── Login.jsx       # Login with email or username
+│   │   └── Maintenance.jsx # Maintenance mode page
+│   ├── App.jsx             # Root router + role-based protected routes
+│   └── main.jsx            # React entry point
 ├── supabase/
-│   └── migrations/         # Database schema migrations
-├── .env.example            # Environment variable template
-├── vercel.json             # Vercel deployment config
-└── vite.config.js          # Vite build config with chunk splitting
+│   └── migrations/         # PostgreSQL schema migrations
+│       └── 20260805123547_remote_schema.sql
+├── .env.example            # Environment variable template (safe to commit)
+├── index.html              # HTML shell with SEO and PWA meta tags
+├── vercel.json             # Vercel deployment: routing, caching, headers
+└── vite.config.js          # Vite build config with manual chunk splitting
 ```
 
 ---
@@ -142,9 +156,9 @@ edoc-main/
 
 ### Prerequisites
 
-- **Node.js** v18 or higher
-- **npm** v9 or higher
-- A **Supabase** project ([supabase.com](https://supabase.com))
+- **Node.js** v18 or higher (`node -v`)
+- **npm** v9 or higher (`npm -v`)
+- A **Supabase** project — create one free at [supabase.com](https://supabase.com)
 
 ### Installation
 
@@ -158,7 +172,7 @@ npm install
 
 # 3. Set up environment variables
 cp .env.example .env
-# Edit .env with your Supabase credentials (see below)
+# Open .env and fill in your Supabase credentials (see below)
 
 # 4. Start the development server
 npm run dev
@@ -168,7 +182,7 @@ The app will be available at `http://localhost:5173`.
 
 ### Environment Variables
 
-Copy `.env.example` to `.env` and fill in your values:
+Copy `.env.example` to `.env` and fill in your Supabase project values:
 
 ```env
 VITE_SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
@@ -178,41 +192,41 @@ VITE_SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
 | Variable | Description | Where to Find |
 |---|---|---|
-| `VITE_SUPABASE_URL` | Your Supabase project URL | Project Settings → API |
-| `VITE_SUPABASE_ANON_KEY` | Public anon key | Project Settings → API |
-| `VITE_SUPABASE_SERVICE_ROLE_KEY` | Service role key (bypasses RLS) | Project Settings → API |
+| `VITE_SUPABASE_URL` | Your Supabase project URL | Project → Settings → API |
+| `VITE_SUPABASE_ANON_KEY` | Public anon key (safe for browser) | Project → Settings → API |
+| `VITE_SUPABASE_SERVICE_ROLE_KEY` | Service role key (bypasses RLS) | Project → Settings → API |
 
-> **Security Note:** The service role key is currently used client-side to bypass RLS while development RLS policies are not yet configured. Before going live, configure proper RLS SELECT policies for `anon` on all tables and remove the service role key from client code.
+> **⚠️ Security Note:** The service role key is currently used client-side because RLS policies have not yet been configured. Before exposing this app to the public internet, configure proper Row Level Security SELECT policies for `anon` on all tables and remove the service role key from client code (or move those calls to a secure server-side API route).
 
 ### Supabase Setup
 
 1. Create a new Supabase project at [supabase.com](https://supabase.com)
-2. Navigate to **SQL Editor** and run the migration file:
+2. Navigate to **SQL Editor** and run the full migration file:
    ```
    supabase/migrations/20260805123547_remote_schema.sql
    ```
-3. To allow the anon key to read data without the service role, also run:
-   ```
-   supabase/migrations/20260805140000_disable_rls_and_policies.sql
-   ```
-4. Go to **Authentication → Users** and create your first admin user with email containing `admin`
-5. In **Table Editor → profiles**, add a row for the new user with `role = 'Admin'`
+3. Go to **Authentication → Users** and create your first Admin user
+4. In **Table Editor → profiles**, add a row for that user:
+   - `id` — the user's UUID from Auth
+   - `role` — `Admin`
+   - `username` — your preferred username
+5. Log in to the app and the Admin dashboard will appear
 
 ---
 
-## User Roles
+## User Roles & Login
 
-The system uses role codes stored in the `profiles` table:
+The system derives each user's role from the `profiles` table (keyed by Supabase Auth UID).
 
-| Role Code | Role | Dashboard |
+Login accepts either an **email address** or a **username** (stored in `profiles.username`). The username lookup resolves to the account's email, then authenticates via Supabase Auth.
+
+| Role | Dashboard URL | profiles.role values |
 |---|---|---|
-| `a` / `Admin` | Administrator | `/admin` |
-| `d` / `Doctor` | Physician | `/doctor` |
-| `r` / `registrar` | Registrar / Receptionist | `/registrar` |
-| `l` / `Lab` | Lab Technician | `/lab` |
-| `ph` / `Pharmacy` | Pharmacist | `/pharmacy` |
-
-Login supports both **email address** and **username** (stored in `profiles.username`).
+| Administrator | `/admin` | `Admin`, `a` |
+| Physician / Doctor | `/doctor` | `Doctor`, `d` |
+| Registrar / Receptionist | `/registrar` | `registrar`, `r` |
+| Lab Technician | `/lab` | `Lab`, `l` |
+| Pharmacist | `/pharmacy` | `Pharmacy`, `ph` |
 
 ---
 
@@ -220,37 +234,45 @@ Login supports both **email address** and **username** (stored in `profiles.user
 
 ### Deploying to Vercel
 
-This project is pre-configured for zero-configuration Vercel deployment.
+This project is pre-configured for zero-configuration Vercel deployment via `vercel.json`.
 
-**Option A — Vercel CLI:**
+**Option A — GitHub Integration (Recommended):**
+1. Push your code to GitHub (already done if you cloned this repo)
+2. Go to [vercel.com/new](https://vercel.com/new)
+3. Click **"Import Git Repository"** and select `hospital_final`
+4. Vercel auto-detects Vite — **no framework settings need to change**
+5. Under **"Environment Variables"**, add the three variables listed below
+6. Click **Deploy**
+
+Every subsequent `git push` to `main` will trigger an automatic redeploy.
+
+**Option B — Vercel CLI:**
 ```bash
+# Install Vercel CLI globally
 npm install -g vercel
+
+# Deploy to production
 vercel --prod
 ```
-
-**Option B — Vercel Dashboard:**
-1. Push your code to GitHub
-2. Go to [vercel.com/new](https://vercel.com/new)
-3. Import the `hospital_final` repository
-4. Vercel auto-detects Vite — no framework settings needed
-5. Add the three environment variables (see below)
-6. Click **Deploy**
 
 ### Environment Variables on Vercel
 
 In your Vercel project → **Settings → Environment Variables**, add:
 
-| Name | Value | Environments |
+| Name | Example Value | Environments |
 |---|---|---|
-| `VITE_SUPABASE_URL` | `https://xxx.supabase.co` | Production, Preview, Development |
-| `VITE_SUPABASE_ANON_KEY` | `eyJ...` | Production, Preview, Development |
-| `VITE_SUPABASE_SERVICE_ROLE_KEY` | `eyJ...` | Production, Preview, Development |
+| `VITE_SUPABASE_URL` | `https://abcdef.supabase.co` | Production, Preview, Development |
+| `VITE_SUPABASE_ANON_KEY` | `eyJhbGciOi...` | Production, Preview, Development |
+| `VITE_SUPABASE_SERVICE_ROLE_KEY` | `eyJhbGciOi...` | Production, Preview, Development |
 
-The `vercel.json` in this repo configures:
+> Variables prefixed with `VITE_` are inlined at build time by Vite. They will be visible in the browser bundle — never put server-only secrets (e.g., Stripe secret keys) in `VITE_` variables.
+
+The `vercel.json` configures:
 - ✅ SPA client-side routing rewrite (`/*` → `/index.html`)
-- ✅ Immutable asset caching (`/assets/*` — 1 year)
-- ✅ Security headers (X-Frame-Options, X-Content-Type-Options, XSS Protection)
-- ✅ Explicit build command, output directory, and framework
+- ✅ Immutable asset caching (`/assets/*` — 1 year, `Cache-Control: immutable`)
+- ✅ Security headers: `X-Frame-Options`, `X-Content-Type-Options`, `XSS-Protection`, `Referrer-Policy`, `Permissions-Policy`
+- ✅ HTTPS enforcement via `Strict-Transport-Security` (HSTS)
+- ✅ Explicit build command, output directory, and framework hint
 
 ---
 
@@ -261,22 +283,23 @@ The login flow has been profiled and optimized:
 | Metric | Before | After |
 |---|---|---|
 | DB queries on login | 4–5 sequential | 1 (sometimes 0) |
-| Total DB overhead | ~2,500ms | ~290ms |
-| Username lookup | `ilike` (~978ms) | `eq` (~290ms) |
+| Total DB overhead | ~2,500 ms | ~290 ms |
+| Username lookup | `ilike` (~978 ms) | `eq` (~290 ms) |
 | AuthContext double-fetch | Yes (2× profiles query) | No (in-memory cache) |
 
-**Techniques used:**
-- In-memory `profileCache` in AuthContext prevents double-fetch when `getSession()` and `onAuthStateChange` fire together
-- `profileHint` passed via `sessionStorage` from Login.jsx to AuthContext skips a second DB round-trip
+**Techniques applied:**
+- In-memory `profileCache` in `AuthContext` prevents double-fetch when `getSession()` and `onAuthStateChange` both fire on load
+- `profileHint` passed via `sessionStorage` from `Login.jsx` to `AuthContext` skips a second DB round-trip entirely
 - Exact `eq()` username lookup instead of case-insensitive `ilike()`
-- Role resolved from `user_metadata` (already embedded in auth response) when available — zero DB cost
-- Vite manual chunk splitting splits the 1.2MB bundle into 5 separately cached chunks
+- Role resolved from `user_metadata` (embedded in the auth token) when available — zero additional DB cost
+- Vite manual chunk splitting separates the bundle into 5 independently cached chunks:
+  - `react-vendor` · `router` · `supabase` · `ui-vendor` · `data-vendor`
 
 ---
 
 ## Database Schema
 
-The database contains 31 tables across the following domains:
+The database contains **24 tables** across the following domains:
 
 | Domain | Tables |
 |---|---|
@@ -284,11 +307,20 @@ The database contains 31 tables across the following domains:
 | **Appointments** | `appointment`, `schedule`, `doctor` |
 | **Lab** | `lab_requests`, `lab_reports`, `lab_catalog`, `lab_inventory` |
 | **Pharmacy** | `medicine`, `pharmacy_sale`, `pharmacy_sale_item`, `suppliers`, `procurement_orders`, `procurement_items` |
-| **Finance** | `sales`, `expenses`, `pricing_matrix`, `treatment_bundles` |
+| **Finance** | `sales`, `expenses`, `pricing_matrix` |
 | **Staff** | `profiles`, `registrar`, `lab_technician`, `pharmacist` |
 | **System** | `system_config`, `audit_logs`, `password_change_requests`, `icd10` |
 
 Full schema is defined in [`supabase/migrations/20260805123547_remote_schema.sql`](supabase/migrations/20260805123547_remote_schema.sql).
+
+---
+
+## Security Notes
+
+- `.env` is listed in `.gitignore` — credentials are never committed
+- `VITE_SUPABASE_SERVICE_ROLE_KEY` is currently used client-side (RLS is disabled for development). **Before going public**, enable RLS and configure `SELECT` policies for the `anon` role on all tables
+- `X-Frame-Options: SAMEORIGIN` allows Supabase Auth iframe flows while blocking clickjacking from external origins
+- `Strict-Transport-Security` enforces HTTPS for all connections once deployed to Vercel
 
 ---
 
@@ -304,4 +336,4 @@ Full schema is defined in [`supabase/migrations/20260805123547_remote_schema.sql
 
 ## License
 
-This project is private and proprietary. All rights reserved © Moonview Medical.
+This project is private and proprietary. All rights reserved © Moonview Medical Centre.

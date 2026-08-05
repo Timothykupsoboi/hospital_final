@@ -82,22 +82,22 @@ function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const checkMaintenance = async () => {
-      try {
-        const { data } = await getSystemConfig();
-        if (data) {
-          const status = data.find(c => c.key === 'system_status')?.value;
-          if (status === 'Maintenance Mode') {
-            setIsMaintenance(true);
-          }
+    let mounted = true;
+    getSystemConfig()
+      .then(({ data }) => {
+        if (!mounted || !data) return;
+        const status = data.find(c => c.key === 'system_status')?.value;
+        if (status === 'Maintenance Mode') {
+          setIsMaintenance(true);
         }
-      } catch (err) {
+      })
+      .catch((err) => {
         console.error('Failed to check maintenance status', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    checkMaintenance();
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+    return () => { mounted = false; };
   }, []);
 
   if (loading || authLoading) {

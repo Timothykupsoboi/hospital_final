@@ -85,7 +85,7 @@ const PatientProfile = () => {
                     ] = await Promise.all([
                         supabase.from('prescriptions').select('*').in('consultation_id', consultIds),
                         supabase.from('vitals_records').select('*').in('consultation_id', consultIds),
-                        supabase.from('lab_requests').select('id, consultation_id').in('consultation_id', consultIds)
+                        supabase.from('lab_requests').select('id, pid').eq('pid', id)
                     ]);
 
                     let lab_reports = [];
