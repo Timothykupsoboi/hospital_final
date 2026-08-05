@@ -79,101 +79,101 @@ const Login = () => {
 
     const loginStart = performance.now();
 
-    // ── Step 1: Resolve username → email (only if no @ in input) ──────────────
-    let emailToUse = email.trim();
+    try {
+      // ── Step 1: Resolve username → email (only if no @ in input) ────────────
+      let emailToUse = email.trim();
 
-    if (!emailToUse.includes('@')) {
-      const t0 = performance.now();
-      // Use exact eq() — 3× faster than ilike(), avoids full table scan
-      const { data: profileData, error: profileErr } = await supabase
-        .from('profiles')
-        .select('email')
-        .eq('username', emailToUse)
-        .maybeSingle();
-      console.log(`[Login] Username lookup: ${(performance.now() - t0).toFixed(1)} ms`);
-
-      if (profileData?.email) {
-        emailToUse = profileData.email;
-      } else {
-        // Case-insensitive fallback only if exact match fails
-        const { data: ilikeData } = await supabase
+      if (!emailToUse.includes('@')) {
+        const t0 = performance.now();
+        // Exact eq() first — 3× faster than ilike()
+        const { data: profileData } = await supabase
           .from('profiles')
           .select('email')
-          .ilike('username', emailToUse)
+          .eq('username', emailToUse)
           .maybeSingle();
-        if (ilikeData?.email) {
-          emailToUse = ilikeData.email;
+        console.log(`[Login] Username lookup: ${(performance.now() - t0).toFixed(1)} ms`);
+
+        if (profileData?.email) {
+          emailToUse = profileData.email;
         } else {
-          setError('Username not found. Please enter a valid username or email address.');
-          setLoading(false);
-          return;
+          // Case-insensitive fallback
+          const { data: ilikeData } = await supabase
+            .from('profiles')
+            .select('email')
+            .ilike('username', emailToUse)
+            .maybeSingle();
+          if (ilikeData?.email) {
+            emailToUse = ilikeData.email;
+          } else {
+            setError('Username not found. Please enter a valid username or email address.');
+            return; // finally will call setLoading(false)
+          }
         }
       }
-    }
 
-    // ── Step 2: Supabase Auth ─────────────────────────────────────────────────
-    const t1 = performance.now();
-    const { data, error: authError } = await supabase.auth.signInWithPassword({
-      email: emailToUse,
-      password,
-    });
-    console.log(`[Login] signInWithPassword: ${(performance.now() - t1).toFixed(1)} ms`);
+      // ── Step 2: Supabase Auth ───────────────────────────────────────────────
+      const t1 = performance.now();
+      const { data, error: authError } = await supabase.auth.signInWithPassword({
+        email: emailToUse,
+        password,
+      });
+      console.log(`[Login] signInWithPassword: ${(performance.now() - t1).toFixed(1)} ms`);
 
-    if (authError) {
-      setError(authError.message || 'Invalid email or password.');
+      if (authError) {
+        setError(authError.message || 'Invalid email or password.');
+        return; // finally will call setLoading(false)
+      }
+
+      // ── Step 3: Resolve redirect route ─────────────────────────────────────
+      const t2 = performance.now();
+      const meta = data.user?.user_metadata || {};
+      const appMeta = data.user?.app_metadata || {};
+      const isAdminEmail = data.user?.email?.toLowerCase().includes('admin');
+
+      let rawRole = meta.usertype || meta.role || appMeta.role || appMeta.usertype;
+      let profileHint = null;
+
+      if (!rawRole || (!ROLE_ROUTES[rawRole] && !ROLE_ROUTES[normalizeRole(rawRole)])) {
+        // user_metadata missing role — fetch profile once
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role, usertype, id, email, full_name, username, status')
+          .eq('id', data.user.id)
+          .maybeSingle();
+        profileHint = profile;
+        rawRole = profile?.role || profile?.usertype || (isAdminEmail ? 'a' : null);
+      }
+      console.log(`[Login] Role resolution: ${(performance.now() - t2).toFixed(1)} ms | role="${rawRole}"`);
+
+      const normalizedRole = normalizeRole(rawRole) || (isAdminEmail ? 'a' : null);
+      const targetRoute = ROLE_ROUTES[rawRole] || ROLE_ROUTES[normalizedRole] || (isAdminEmail ? '/admin' : null);
+
+      if (!targetRoute) {
+        console.error('[Login] Unrecognized role:', rawRole, '| metadata:', meta);
+        setError('Account role not recognized. Contact the system administrator.');
+        await supabase.auth.signOut();
+        return; // finally will call setLoading(false)
+      }
+
+      console.log(`[Login] Total: ${(performance.now() - loginStart).toFixed(1)} ms → ${targetRoute}`);
+
+      // Pass profileHint to AuthContext via sessionStorage so it skips a second DB fetch
+      if (profileHint) {
+        try {
+          sessionStorage.setItem(`profileHint_${data.user.id}`, JSON.stringify(profileHint));
+        } catch (_) {}
+      }
+
+      navigate(targetRoute, { replace: true });
+
+    } catch (err) {
+      // Catch any unexpected JS/network error so the button never freezes
+      console.error('[Login] Unexpected error:', err);
+      setError('An unexpected error occurred. Please try again.');
+    } finally {
+      // ALWAYS unlock the button — no matter what path was taken above
       setLoading(false);
-      return;
     }
-
-    // ── Step 3: Resolve redirect route ───────────────────────────────────────
-    // Priority: user_metadata (free, already in auth response) → single profile
-    // fetch (AuthContext will need this anyway, so we fetch once and pass it via
-    // navigate state as `profileHint` to prevent AuthContext from re-fetching).
-    const t2 = performance.now();
-    const meta = data.user?.user_metadata || {};
-    const appMeta = data.user?.app_metadata || {};
-    const isAdminEmail = data.user?.email?.toLowerCase().includes('admin');
-
-    // Try to resolve role from user_metadata first (zero cost)
-    let rawRole = meta.usertype || meta.role || appMeta.role || appMeta.usertype;
-    let profileHint = null;
-
-    if (!rawRole || !ROLE_ROUTES[rawRole] && !ROLE_ROUTES[normalizeRole(rawRole)]) {
-      // user_metadata missing role — fetch profile once (AuthContext gets it via hint)
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('role, usertype, id, email, full_name, username, status')
-        .eq('id', data.user.id)
-        .maybeSingle();
-      profileHint = profile;
-      rawRole = profile?.role || profile?.usertype || (isAdminEmail ? 'a' : null);
-    }
-    console.log(`[Login] Role resolution: ${(performance.now() - t2).toFixed(1)} ms | role="${rawRole}"`);
-
-    const normalizedRole = normalizeRole(rawRole) || (isAdminEmail ? 'a' : null);
-    const targetRoute = ROLE_ROUTES[rawRole] || ROLE_ROUTES[normalizedRole] || (isAdminEmail ? '/admin' : null);
-
-    if (!targetRoute) {
-      console.error('[Login] Unrecognized role:', rawRole, '| metadata:', meta);
-      setError('Account profile role not recognized. Please contact the system administrator.');
-      await supabase.auth.signOut();
-      setLoading(false);
-      return;
-    }
-
-    console.log(`[Login] Total login time: ${(performance.now() - loginStart).toFixed(1)} ms → ${targetRoute}`);
-
-    // Store profileHint in sessionStorage — AuthContext's onAuthStateChange fires
-    // synchronously on the same tick as signInWithPassword resolving, before React
-    // re-renders, so we bridge the data via sessionStorage to skip a second DB fetch.
-    if (profileHint) {
-      try {
-        sessionStorage.setItem(`profileHint_${data.user.id}`, JSON.stringify(profileHint));
-      } catch (_) {}
-    }
-
-    navigate(targetRoute, { replace: true });
-    setLoading(false);
   };
 
   return (
